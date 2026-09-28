@@ -79,6 +79,6 @@ ws.column_dimensions["A"].width = 22
 for col in "BCDE":
     ws.column_dimensions[col].width = 14
 
-wb.save(OUTPUT)
-print(f"[+] Generated genuine XLSX: {OUTPUT}")
-print(f"    Marker '7vQm91Xe' placed in cell B17")
+wb.save(str(OUTPUT))
+print("[+] Generated genuine XLSX: {}".format(OUTPUT))
+print("    Marker '7vQm91Xe' placed in cell B17")
