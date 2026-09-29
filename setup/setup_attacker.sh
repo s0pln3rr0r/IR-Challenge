@@ -6,7 +6,7 @@ source "$ROOT/config.env"
 mkdir -p "$ROOT/runtime/received" "$ROOT/output"
 
 # Configure IP aliases so all six logical destinations terminate on this VM
-sudo bash "$ROOT/setup/configure_routing.sh" "${CAPTURE_INTERFACE:-eth1}"
+sudo bash "$ROOT/setup/configure_routing.sh" "${CAPTURE_INTERFACE:-eth0}"
 
 # Configure FTP server
 sudo bash "$ROOT/setup/configure_ftp.sh"

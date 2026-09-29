@@ -5,6 +5,9 @@ source "$ROOT/config.env"
 
 mkdir -p "$ROOT/runtime/received"
 
+# Configure IP aliases so all six logical destinations terminate on this VM
+sudo bash "$ROOT/setup/configure_routing.sh" "${CAPTURE_INTERFACE:-eth0}"
+
 # Generate QR code images (also used by smtp_sender.py at runtime)
 python3 "$ROOT/attacker/generate_qr.py"
 
