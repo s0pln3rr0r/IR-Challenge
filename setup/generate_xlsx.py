@@ -13,7 +13,8 @@ except ImportError:
     raise SystemExit(1)
 
 OUTPUT = Path("/opt/finance/q3_forecast.xlsx")
-OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+try: OUTPUT.parent.mkdir(parents=True)
+except FileExistsError: pass
 
 wb = Workbook()
 ws = wb.active
