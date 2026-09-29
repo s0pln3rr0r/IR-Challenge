@@ -50,4 +50,8 @@ cat >/etc/audit/rules.d/six-ways-out.rules <<'EOF'
 EOF
 augenrules --load || true
 systemctl restart auditd || true
+
+# Configure routing so all six destination IPs route through the services machine
+sudo bash "$ROOT/setup/configure_victim_routing.sh"
+
 echo "[+] victim ready"

