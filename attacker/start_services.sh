@@ -17,7 +17,12 @@ nohup env SIXWAYS_RUNTIME="$ROOT/runtime" python3 "$ROOT/attacker/http_server.py
 # Start DNS receiver
 nohup env SIXWAYS_RUNTIME="$ROOT/runtime" python3 "$ROOT/attacker/dns_server.py" >"$ROOT/runtime/dns.log" 2>&1 & echo $! >"$ROOT/runtime/dns.pid"
 
-# Start WebSocket receiver
+# Kill any existing WebSocket server first
+if [ -f "$ROOT/runtime/websocket.pid" ]; then
+    kill "$(cat "$ROOT/runtime/websocket.pid")" 2>/dev/null || true
+    rm -f "$ROOT/runtime/websocket.pid"
+fi
+# Start WebSocket receiver (raw socket implementation, no websockets library needed)
 nohup python3 "$ROOT/attacker/websocket_server.py" >"$ROOT/runtime/websocket.log" 2>&1 & echo $! >"$ROOT/runtime/websocket.pid"
 
 # Ensure FTP and SMTP services are running

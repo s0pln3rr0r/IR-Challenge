@@ -9,8 +9,7 @@ python3 -m pip install --upgrade pip 2>/dev/null || \
   (curl -sS https://bootstrap.pypa.io/pip/3.4/get-pip.py -o /tmp/get-pip.py 2>/dev/null && \
    python3 /tmp/get-pip.py 2>/dev/null) || true
 python3 -m pip install openpyxl 2>/dev/null || apt-get install -y python3-openpyxl 2>/dev/null || true
-# Install websockets for WebSocket exfiltration channel
-python3 -m pip install 'websockets<10' 2>/dev/null || true
+# Note: WebSocket client uses raw sockets, no websockets library needed
 mkdir -p /opt/app/config /opt/hr /var/backups /opt/finance /srv/app/releases /var/log/app
 cat >/opt/app/config/production.env <<'EOF'
 APP_ENV=production
