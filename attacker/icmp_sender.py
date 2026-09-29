@@ -8,6 +8,9 @@ import os
 import sys
 from pathlib import Path
 
+# Suppress mspac layer to avoid CLAIM_TYPE enum KeyError on Python 3.4 + scapy 2.7.0
+os.environ.setdefault("SCAPY_SUPPRESS_LAYERS", "mspac")
+
 try:
     from scapy.all import IP, ICMP, Raw, send
 except ImportError:
@@ -22,7 +25,7 @@ def main():
     parser.add_argument("--chunk-size", type=int, default=56, help="Payload chunk size in bytes (default: 56)")
     args = parser.parse_args()
 
-    hex_data = Path(args.hex_file).read_text().strip()
+    hex_data = open(args.hex_file).read().strip()
     dest_ip = args.dest
     chunk_size = args.chunk_size
 

@@ -78,7 +78,7 @@ http_payload_file = received_dir / "http_payload.b64"
 
 if http_payload_file.exists():
     try:
-        b64_data = http_payload_file.read_text().strip()
+        b64_data = open(str(http_payload_file)).read().strip()
         xor_data = base64.b64decode(b64_data)
         key = HTTP_KEY
         decoded = bytes(x ^ key[i % len(key)] for i, x in enumerate(xor_data))
@@ -100,7 +100,7 @@ dns_log = received_dir / "dns_queries.log"
 
 if dns_log.exists():
     try:
-        lines = dns_log.read_text().strip().splitlines()
+        lines = open(str(dns_log)).read().strip().splitlines()
         # Extract labels before .exfil.example
         chunks = []
         for line in lines:
@@ -379,7 +379,7 @@ if not ftp_received.exists():
 
 if ftp_received.exists():
     try:
-        b64_data = ftp_received.read_text().strip()
+        b64_data = open(str(ftp_received)).read().strip()
         gz_data = base64.b64decode(b64_data)
         xlsx_data = gzip.decompress(gz_data)
         # Check for marker in the XLSX
@@ -400,7 +400,7 @@ print("\n=== WebSocket Channel ===")
 ws_payload = received_dir / "websocket_payload"
 if ws_payload.exists():
     try:
-        enc_data = ws_payload.read_bytes()
+        enc_data = open(str(ws_payload), 'rb').read()
         # OpenSSL encrypted format: Salted__ + 8-byte salt + ciphertext
         if enc_data.startswith(b"Salted__"):
             salt = enc_data[8:16]
@@ -416,8 +416,8 @@ if ws_payload.exists():
         
         try:
             result = subprocess.run(
-                ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
-                 "-salt", "-pass", "pass:{}".format(WS_PASSWORD),
+                ["openssl", "enc", "-aes-256-cbc", "-d",
+                 "-salt", "-md", "sha256", "-pass", "pass:{}".format(WS_PASSWORD),
                  "-in", tmp_enc_path],
                 capture_output=True, text=False, timeout=30
             )

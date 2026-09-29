@@ -14,7 +14,9 @@ if not BASH_HIST.exists():
     print("[-] Run collection/collect_endpoint.sh first")
     sys.exit(1)
 
-lines = BASH_HIST.read_text(errors="replace").splitlines()
+with open(str(BASH_HIST), 'rb') as f:
+    raw = f.read()
+lines = raw.decode("utf-8", errors="replace").splitlines()
 print("bash history lines: {}".format(len(lines)))
 
 # Check for expected patterns
