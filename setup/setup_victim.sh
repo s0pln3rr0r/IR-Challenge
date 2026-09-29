@@ -38,6 +38,7 @@ EOF
 printf '%s\n' '2026-09-27T18:00:01Z INFO application started' >/var/log/app/application.log
 touch /root/.bash_history
 chmod 600 /root/.bash_history
+mkdir -p /etc/audit/rules.d
 cat >/etc/audit/rules.d/six-ways-out.rules <<'EOF'
 -a always,exit -F arch=b64 -S execve -k sixways_exec
 -w /opt/app/config/production.env -p rwxa -k sixways_sensitive
