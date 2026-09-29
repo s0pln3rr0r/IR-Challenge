@@ -137,23 +137,23 @@ else:
 # ---------------------------------------------------------------------------
 print("\n=== SMTP Channel ===")
 
-def extract_smtp_attachments(pcap_path: Path) -> list:
-    """Use tshark to extract PNG attachments from SMTP in PCAP."""
+def extract_smtp_attachments(pcap_path):
+    """Use tshark to extract PNG attachments from SMTP in PCAP (Python 3.4 compatible)."""
     attachments = []
     try:
-        # First, find SMTP packets with data fragments
-        result = subprocess.run(
+        import subprocess
+        proc = subprocess.Popen(
             ["tshark", "-r", str(pcap_path), "-Y", "smtp.data.fragment",
              "-T", "fields", "-e", "tcp.stream", "-e", "smtp.data.fragment",
              "-l"],
-            capture_output=True, text=True, timeout=30
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        if result.returncode != 0 and result.returncode != 1:
-            print("    tshark warning: {}".format(result.stderr.strip()))
+        out, _ = proc.communicate()
+        output = out.decode("utf-8", errors="replace")
         
         # Group by TCP stream
         streams = {}
-        for line in result.stdout.strip().splitlines():
+        for line in output.strip().splitlines():
             parts = line.split("\t", 1)
             if len(parts) == 2:
                 stream_id, fragment = parts
@@ -167,58 +167,48 @@ def extract_smtp_attachments(pcap_path: Path) -> list:
             # Look for PNG signatures in the raw data
             png_start = full_data.find("\x89PNG")
             while png_start != -1:
-                png_end = full_data.find(b"IEND", png_start)
+                png_end = full_data.find("IEND", png_start)
                 if png_end != -1:
                     png_data = full_data[png_start:png_end + 4]
                     attachments.append(png_data.encode("latin-1") if isinstance(png_data, str) else png_data)
                 png_start = full_data.find("\x89PNG", png_start + 1)
-        
-        # Alternative: use tshark to follow TCP streams and extract
-        if not attachments:
-            for stream_id in streams:
-                result = subprocess.run(
-                    ["tshark", "-r", str(pcap_path), "-z", "follow,tcp,ascii,{}".format(stream_id)],
-                    capture_output=True, text=True, timeout=30
-                )
-                # Look for PNG in the output
-                for line in result.stdout.splitlines():
-                    if "\x89PNG" in line:
-                        # Extract the raw stream data
-                        pass
-    except FileNotFoundError:
-        print("    tshark not available for SMTP extraction")
     except Exception as e:
         print("    SMTP extraction error: {}".format(e))
     return attachments
 
 
-def decode_qr_from_png(png_bytes: bytes) -> str:
-    """Decode a QR code from PNG bytes using pyzbar or qrcode."""
+def decode_qr_with_python(png_path):
+    """Decode a QR code PNG using python3 subprocess with qrcode library."""
+    import subprocess
+    import tempfile
     try:
-        from PIL import Image
-        import qrcode as qrcode_lib
-        from qrcode.image.pil import PilImage
-        
-        img = Image.open(io.BytesIO(png_bytes))
-        
-        # Try using pyzbar first
-        try:
-            from pyzbar.pyzbar import decode as pyzbar_decode
-            decoded = pyzbar_decode(img)
-            if decoded:
-                return decoded[0].data.decode("utf-8")
-        except ImportError:
-            pass
-        
-        # Fallback: use qrcode's decoder
-        # This is a basic approach - in production, use pyzbar
-        try:
-            from pyzbar.pyzbar import decode as pyzbar_decode
-        except ImportError:
-            print("    Install pyzbar for QR decoding: pip install pyzbar")
-            return ""
-    except Exception as e:
-        print("    QR decode error: {}".format(e))
+        code = (
+            "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); "
+            "from PIL import Image; "
+            "img = Image.open(sys.argv[1]); "
+            "# Try pyzbar first\n"
+            "try:\n"
+            "    from pyzbar.pyzbar import decode as d\n"
+            "    r = d(img)\n"
+            "    if r: print(r[0].data.decode()); sys.exit(0)\n"
+            "except ImportError: pass\n"
+            "# Fallback: use qrcode's decoder if available\n"
+            "try:\n"
+            "    from pyzbar.pyzbar import decode as d\n"
+            "    r = d(img)\n"
+            "    if r: print(r[0].data.decode())\n"
+            "except ImportError: print('no_decoder')\n"
+        )
+        proc = subprocess.Popen(
+            ["python3", "-c", code, str(png_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        out, _ = proc.communicate()
+        result = out.decode("utf-8", errors="replace").strip()
+        if result and result != "no_decoder":
+            return result
+    except Exception:
+        pass
     return ""
 
 
@@ -235,23 +225,13 @@ if smtp_pieces:
     # Decode the QR pieces
     decoded_pieces = []
     for fpath in sorted(smtp_pieces):
-        try:
-            from PIL import Image
-            try:
-                from pyzbar.pyzbar import decode as pyzbar_decode
-                img = Image.open(fpath)
-                data = pyzbar_decode(img)
-                if data:
-                    decoded_pieces.append(data[0].data.decode("utf-8"))
-                    log_ok("SMTP", "Decoded {}: {}".format(fpath.name, data[0].data.decode('utf-8')))
-                else:
-                    decoded_pieces.append("")
-                    log_fail("SMTP", "No QR data in {}".format(fpath.name))
-            except ImportError:
-                log_fail("SMTP", "pyzbar not installed for QR decoding")
-                break
-        except Exception as e:
-            log_fail("SMTP", "Failed to decode {}: {}".format(fpath.name, e))
+        data = decode_qr_with_python(fpath)
+        if data:
+            decoded_pieces.append(data)
+            log_ok("SMTP", "Decoded {}: {}".format(fpath.name, data))
+        else:
+            decoded_pieces.append("")
+            log_fail("SMTP", "No QR data in {}".format(fpath.name))
     
     combined = "".join(decoded_pieces)
     if combined == EXPECTED_MARKERS["SMTP"]:
@@ -266,43 +246,30 @@ else:
 # ---------------------------------------------------------------------------
 print("\n=== ICMP Channel ===")
 
-def extract_icmp_payloads(pcap_path: Path) -> list:
-    """Extract ICMP Echo Request payloads from PCAP using scapy or tshark."""
+def extract_icmp_payloads(pcap_path):
+    """Extract ICMP Echo Request payloads from PCAP using tshark (Python 3.4 compatible)."""
     payloads = []
+    # Use tshark directly (Python 3.4's subprocess.run doesn't exist)
     try:
-        # Try scapy first
-        from scapy.all import rdpcap, ICMP, Raw
-        packets = rdpcap(str(pcap_path))
-        for pkt in packets:
-            if pkt.haslayer(ICMP) and pkt[ICMP].type == 8:  # Echo Request
-                if pkt.haslayer(Raw):
-                    seq = pkt[ICMP].seq
-                    raw = pkt[Raw].load
-                    try:
-                        payload = raw.decode("utf-8", errors="replace")
-                        payloads.append((seq, payload))
-                    except:
-                        pass
-    except ImportError:
-        # Fallback to tshark
-        try:
-            result = subprocess.run(
-                ["tshark", "-r", str(pcap_path), "-Y", "icmp.type==8",
-                 "-T", "fields", "-e", "icmp.seq", "-e", "data.data", "-l"],
-                capture_output=True, text=True, timeout=30
-            )
-            for line in result.stdout.strip().splitlines():
-                parts = line.split("\t")
-                if len(parts) == 2:
+        import subprocess
+        proc = subprocess.Popen(
+            ["tshark", "-r", str(pcap_path), "-Y", "icmp.type==8",
+             "-T", "fields", "-e", "icmp.seq", "-e", "data.data", "-l"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        out, _ = proc.communicate()
+        for line in out.decode("utf-8", errors="replace").strip().splitlines():
+            parts = line.split("\t")
+            if len(parts) == 2:
+                try:
                     seq = int(parts[0])
                     hex_data = parts[1].replace(":", "")
-                    try:
-                        payload = bytes.fromhex(hex_data).decode("utf-8", errors="replace")
-                        payloads.append((seq, payload))
-                    except:
-                        pass
-        except FileNotFoundError:
-            print("    scapy/tshark not available for ICMP extraction")
+                    payload = bytes(bytearray.fromhex(hex_data)).decode("utf-8", errors="replace")
+                    payloads.append((seq, payload))
+                except:
+                    pass
+    except Exception as e:
+        print("    tshark not available for ICMP extraction: {}".format(e))
     return payloads
 
 
@@ -330,37 +297,20 @@ else:
 # ---------------------------------------------------------------------------
 print("\n=== FTP Channel ===")
 
-def extract_ftp_data(pcap_path: Path) -> bytes:
-    """Extract FTP data from PCAP using scapy or tshark."""
+def extract_ftp_data(pcap_path):
+    """Extract FTP data from PCAP using tshark (Python 3.4 compatible)."""
     try:
-        from scapy.all import rdpcap, TCP, Raw
-        packets = rdpcap(str(pcap_path))
-        # Find FTP data packets (port 20 or data channel)
-        ftp_data = b""
-        for pkt in packets:
-            if pkt.haslayer(TCP) and pkt.haslayer(Raw):
-                sport = pkt[TCP].sport
-                dport = pkt[TCP].dport
-                payload = bytes(pkt[Raw].load)
-                # FTP data typically on port 20 or high ports after STOR
-                if sport == 20 or dport == 20:
-                    ftp_data += payload
-                # Also check for data on high ports (passive FTP)
-                elif payload.startswith(b"begin") or payload.startswith(b"BASE64"):
-                    ftp_data += payload
-        return ftp_data
-    except ImportError:
-        # Fallback to tshark
-        try:
-            result = subprocess.run(
-                ["tshark", "-r", str(pcap_path), "-Y", "ftp-data",
-                 "-T", "fields", "-e", "data.data", "-l"],
-                capture_output=True, text=True, timeout=30
-            )
-            hex_data = "".join(result.stdout.strip().splitlines()).replace(":", "")
-            return bytes.fromhex(hex_data) if hex_data else b""
-        except:
-            pass
+        import subprocess
+        proc = subprocess.Popen(
+            ["tshark", "-r", str(pcap_path), "-Y", "ftp-data",
+             "-T", "fields", "-e", "data.data", "-l"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        out, _ = proc.communicate()
+        hex_data = "".join(out.decode("utf-8", errors="replace").strip().splitlines()).replace(":", "")
+        return bytes(bytearray.fromhex(hex_data)) if hex_data else b""
+    except:
+        pass
     return b""
 
 

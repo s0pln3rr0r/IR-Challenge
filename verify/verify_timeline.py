@@ -3,18 +3,30 @@
 Timeline verification for Six Ways Out.
 Checks that the bash history contains expected patterns and produces a timeline.
 """
-from pathlib import Path
+import os
 import sys
 
-ROOT = Path(__file__).resolve().parent.parent
-BASH_HIST = ROOT / "output/endpoint/bash_history.txt"
-AUDIT_LOG = ROOT / "output/endpoint/audit.log"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-if not BASH_HIST.exists():
+# Try victim bash history first, fall back to local
+BASH_HIST_PATHS = [
+    os.path.join(ROOT, "output/endpoint/victim_bash_history.txt"),
+    os.path.join(ROOT, "output/endpoint/bash_history.txt"),
+]
+
+bash_hist_path = None
+for p in BASH_HIST_PATHS:
+    if os.path.exists(p):
+        bash_hist_path = p
+        break
+
+if bash_hist_path is None:
     print("[-] Run collection/collect_endpoint.sh first")
+    print("[-] Looked for: {}".format(", ".join(BASH_HIST_PATHS)))
     sys.exit(1)
 
-with open(str(BASH_HIST), 'rb') as f:
+print("[*] Using bash history from: {}".format(bash_hist_path))
+with open(bash_hist_path, 'rb') as f:
     raw = f.read()
 lines = raw.decode("utf-8", errors="replace").splitlines()
 print("bash history lines: {}".format(len(lines)))
