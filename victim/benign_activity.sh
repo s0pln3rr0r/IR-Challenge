@@ -17,6 +17,8 @@ ping -c 1 -W 1 127.0.0.1 >/dev/null 2>&1 || true
 ping -c 1 -W 1 10.10.20.50 >/dev/null 2>&1 || true
 
 # gzip — legitimate log rotation
+mkdir -p /var/log/app
+echo "legitimate log entry $(date)" >>/var/log/app/application.log
 gzip -c /var/log/app/application.log >/tmp/legit.log.gz
 
 # base64 — legitimate encoding
