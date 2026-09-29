@@ -3,6 +3,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/config.env"
 hostnamectl set-hostname "$VICTIM_HOSTNAME" 2>/dev/null || hostname "$VICTIM_HOSTNAME" 2>/dev/null || true
+# Install openpyxl for Python 3 (Ubuntu 14.04 only has it for Python 2)
+# Bootstrap pip first if needed (Ubuntu 14.04 pip is too old)
+python3 -m pip install --upgrade pip 2>/dev/null || \
+  (curl -sS https://bootstrap.pypa.io/pip/3.4/get-pip.py -o /tmp/get-pip.py 2>/dev/null && \
+   python3 /tmp/get-pip.py 2>/dev/null) || true
+python3 -m pip install openpyxl 2>/dev/null || apt-get install -y python3-openpyxl 2>/dev/null || true
 mkdir -p /opt/app/config /opt/hr /var/backups /opt/finance /srv/app/releases /var/log/app
 cat >/opt/app/config/production.env <<'EOF'
 APP_ENV=production
