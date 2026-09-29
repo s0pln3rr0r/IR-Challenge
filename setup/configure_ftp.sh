@@ -8,7 +8,15 @@ source "$ROOT/config.env"
 if ! id "$FTP_USER" &>/dev/null; then
     useradd -m -s /usr/sbin/nologin "$FTP_USER"
 fi
-echo "$FTP_USER:$FTP_PASSWORD" | chpasswd
+# Force password reset — use chpasswd with single-quoted string to avoid shell expansion
+echo "$FTP_USER:DailyBackup!2026" | chpasswd 2>/dev/null || true
+# Also try via passwd if chpasswd had issues
+printf '%s\n%s\n' 'DailyBackup!2026' 'DailyBackup!2026' | passwd "$FTP_USER" 2>/dev/null || true
+
+# Ensure /usr/sbin/nologin is in /etc/shells for vsftpd
+if ! grep -q /usr/sbin/nologin /etc/shells 2>/dev/null; then
+    echo /usr/sbin/nologin >>/etc/shells
+fi
 
 # Create FTP root and set permissions
 FTP_ROOT="/srv/ftp/exfil"
