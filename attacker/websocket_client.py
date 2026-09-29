@@ -6,4 +6,6 @@ async def m():
     async with websockets.connect(a.url) as w:
         await w.send(Path(a.file).read_bytes())
         await w.recv()
-asyncio.run(m())
+loop=asyncio.get_event_loop()
+loop.run_until_complete(m())
+loop.close()

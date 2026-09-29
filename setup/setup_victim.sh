@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/config.env"
-hostnamectl set-hostname "$VICTIM_HOSTNAME"
+hostnamectl set-hostname "$VICTIM_HOSTNAME" 2>/dev/null || hostname "$VICTIM_HOSTNAME" 2>/dev/null || true
 mkdir -p /opt/app/config /opt/hr /var/backups /opt/finance /srv/app/releases /var/log/app
 cat >/opt/app/config/production.env <<'EOF'
 APP_ENV=production

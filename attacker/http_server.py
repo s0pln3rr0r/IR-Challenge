@@ -2,7 +2,9 @@
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
 import os
-out=Path(os.environ.get("SIXWAYS_RUNTIME","./runtime"))/"received"; out.mkdir(parents=True,exist_ok=True)
+out=Path(os.environ.get("SIXWAYS_RUNTIME","./runtime"))/"received"
+try: out.mkdir(parents=True)
+except FileExistsError: pass
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n=int(self.headers.get("Content-Length","0")); b=self.rfile.read(n)
