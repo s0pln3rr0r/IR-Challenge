@@ -65,7 +65,11 @@ def check_file_exists(path: Path, desc: str) -> bool:
 print("\n=== File Existence ===")
 check_file_exists(PCAP, "PCAP")
 check_file_exists(BASH_HIST, "Bash history")
-check_file_exists(AUDIT_LOG, "Audit log")
+# Audit log is optional (Ubuntu 14.04 may not have auditd)
+if AUDIT_LOG.exists():
+    log_ok("Files", "Audit log exists: {}".format(AUDIT_LOG))
+else:
+    print("  [i] Files: Audit log not found (optional on Ubuntu 14.04)")
 check_file_exists(ENDPOINT / "auth.log", "Auth log")
 check_file_exists(ENDPOINT / "syslog.log", "Syslog")
 
@@ -138,10 +142,19 @@ else:
 print("\n=== SMTP Channel ===")
 
 def extract_smtp_attachments(pcap_path):
-    """Use tshark to extract PNG attachments from SMTP in PCAP (Python 3.4 compatible)."""
+    """Use tshark to extract PNG attachments from SMTP in PCAP (Python 3.4 compatible).
+    
+    SMTP attachments are base64-encoded in the email body. This function:
+    1. Extracts the full SMTP data fragments from the PCAP
+    2. Reconstructs the email bodies
+    3. Finds base64-encoded PNG data and decodes it
+    """
     attachments = []
     try:
         import subprocess
+        import base64
+        import re
+        
         proc = subprocess.Popen(
             ["tshark", "-r", str(pcap_path), "-Y", "smtp.data.fragment",
              "-T", "fields", "-e", "tcp.stream", "-e", "smtp.data.fragment",
@@ -161,24 +174,70 @@ def extract_smtp_attachments(pcap_path):
                     streams[stream_id] = []
                 streams[stream_id].append(fragment)
         
-        # Try to find PNGs in each stream
+        # Reconstruct email bodies and find base64 PNG data
         for stream_id, fragments in streams.items():
             full_data = "".join(fragments)
-            # Look for PNG signatures in the raw data
-            png_start = full_data.find("\x89PNG")
-            while png_start != -1:
-                png_end = full_data.find("IEND", png_start)
-                if png_end != -1:
-                    png_data = full_data[png_start:png_end + 4]
-                    attachments.append(png_data.encode("latin-1") if isinstance(png_data, str) else png_data)
-                png_start = full_data.find("\x89PNG", png_start + 1)
+            
+            # Try to find base64-encoded PNG data between boundaries
+            # Pattern: Content-Type: image/png ... base64 data ... boundary
+            lines = full_data.split("\n")
+            in_png = False
+            b64_lines = []
+            for line in lines:
+                line = line.strip()
+                if "Content-Type: image/png" in line or 'name="IMG_' in line:
+                    in_png = True
+                    b64_lines = []
+                    continue
+                if in_png:
+                    if line.startswith("--") or line.startswith("Content-"):
+                        # End of base64 data, try to decode
+                        if b64_lines:
+                            b64_text = "".join(b64_lines)
+                            try:
+                                png_data = base64.b64decode(b64_text)
+                                if png_data[:4] == b"\x89PNG":
+                                    attachments.append(png_data)
+                            except Exception:
+                                pass
+                        if line.startswith("--"):
+                            in_png = False
+                        continue
+                    if line and not line.startswith("="):
+                        b64_lines.append(line)
+            
+            # Also try raw hex dump approach for SMTP data
+            # Sometimes tshark outputs hex-encoded data
+            hex_data = ""
+            for frag in fragments:
+                # Check if fragment looks like hex (no spaces, hex chars only)
+                clean = frag.strip().replace(":", "")
+                if all(c in "0123456789abcdefABCDEF" for c in clean) and len(clean) > 20:
+                    hex_data += clean
+            
+            if hex_data:
+                try:
+                    raw_bytes = bytes(bytearray.fromhex(hex_data))
+                    text = raw_bytes.decode("utf-8", errors="replace")
+                    # Find base64 PNG data in the decoded text
+                    for match in re.finditer(r'Content-Type: image/png.*?\n\n(.*?)\n--', text, re.DOTALL):
+                        b64_text = match.group(1).replace("\n", "").replace("\r", "").replace(" ", "")
+                        try:
+                            png_data = base64.b64decode(b64_text)
+                            if png_data[:4] == b"\x89PNG":
+                                attachments.append(png_data)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                    
     except Exception as e:
         print("    SMTP extraction error: {}".format(e))
     return attachments
 
 
 def decode_qr_with_python(png_path):
-    """Decode a QR code PNG using python3 subprocess with qrcode library."""
+    """Decode a QR code PNG using python3 subprocess with available libraries."""
     import subprocess
     import tempfile
     try:
@@ -192,11 +251,13 @@ def decode_qr_with_python(png_path):
             "    r = d(img)\n"
             "    if r: print(r[0].data.decode()); sys.exit(0)\n"
             "except ImportError: pass\n"
-            "# Fallback: use qrcode's decoder if available\n"
+            "# Fallback: use qrcode's decoder\n"
             "try:\n"
+            "    import qrcode\n"
             "    from pyzbar.pyzbar import decode as d\n"
             "    r = d(img)\n"
             "    if r: print(r[0].data.decode())\n"
+            "    else: print('no_data')\n"
             "except ImportError: print('no_decoder')\n"
         )
         proc = subprocess.Popen(
@@ -205,7 +266,29 @@ def decode_qr_with_python(png_path):
         )
         out, _ = proc.communicate()
         result = out.decode("utf-8", errors="replace").strip()
-        if result and result != "no_decoder":
+        if result and result not in ("no_decoder", "no_data"):
+            return result
+    except Exception:
+        pass
+    # Last resort: try using zbarlight if available
+    try:
+        proc = subprocess.Popen(
+            ["python3", "-c",
+             "import sys; "
+             "try:\n"
+             "    from PIL import Image; "
+             "    import zbarlight; "
+             "    img = Image.open(sys.argv[1]); "
+             "    codes = zbarlight.scan_codes('qrcode', img); "
+             "    if codes: print(codes[0].decode())\n"
+             "    else: print('')\n"
+             "except Exception: print('')\n",
+             str(png_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        out, _ = proc.communicate()
+        result = out.decode("utf-8", errors="replace").strip()
+        if result:
             return result
     except Exception:
         pass
@@ -220,6 +303,24 @@ if smtp_qr_dir.exists():
         fpath = smtp_qr_dir / fname
         if fpath.exists():
             smtp_pieces.append(fpath)
+
+# If no QR files found in runtime/qr, try extracting from PCAP
+if not smtp_pieces:
+    print("    [*] No QR files in runtime/qr/, trying PCAP extraction...")
+    smtp_attachments = extract_smtp_attachments(PCAP)
+    if smtp_attachments:
+        # Save extracted PNGs and try to decode
+        try:
+            smtp_qr_dir.mkdir(parents=True)
+        except FileExistsError:
+            pass
+        for i, png_data in enumerate(smtp_attachments[:3]):
+            fname = "IMG_184{}.png".format(i + 1)
+            fpath = smtp_qr_dir / fname
+            with open(str(fpath), 'wb') as f:
+                f.write(png_data)
+            smtp_pieces.append(fpath)
+            print("    [*] Extracted {} from PCAP ({} bytes)".format(fname, len(png_data)))
 
 if smtp_pieces:
     # Decode the QR pieces
@@ -239,7 +340,7 @@ if smtp_pieces:
     else:
         log_fail("SMTP", "Combined marker mismatch: got '{}', expected '{}'".format(combined, EXPECTED_MARKERS['SMTP']))
 else:
-    log_fail("SMTP", "No QR PNG files found in runtime/qr/")
+    log_fail("SMTP", "No QR PNG files found in runtime/qr/ or PCAP")
 
 # ---------------------------------------------------------------------------
 # 5. ICMP reconstruction
@@ -279,7 +380,7 @@ if icmp_payloads:
     icmp_payloads.sort(key=lambda x: x[0])
     hex_text = "".join(p[1] for p in icmp_payloads)
     try:
-        xor_data = bytes.fromhex(hex_text)
+        xor_data = bytes(bytearray.fromhex(hex_text))
         key = ICMP_KEY
         decoded = bytes(x ^ key[i % len(key)] for i, x in enumerate(xor_data))
         decoded_text = decoded.decode("utf-8", errors="replace")
@@ -321,17 +422,43 @@ if not ftp_received.exists():
     ftp_server_paths = [
         Path("/srv/ftp/exfil/daily_metrics.dat"),
         Path("/home/svc_backup/daily_metrics.dat"),
+        Path("/var/ftp/exfil/daily_metrics.dat"),
     ]
     for p in ftp_server_paths:
         if p.exists():
             ftp_received = p
             break
 
+if not ftp_received.exists():
+    # Try extracting FTP data from PCAP
+    print("    [*] FTP file not found on disk, trying PCAP extraction...")
+    ftp_data = extract_ftp_data(PCAP)
+    if ftp_data:
+        # Save it for inspection
+        try:
+            received_dir.mkdir(parents=True)
+        except FileExistsError:
+            pass
+        ftp_received = received_dir / "daily_metrics.dat"
+        with open(str(ftp_received), 'wb') as f:
+            f.write(ftp_data)
+        print("    [*] Extracted {} bytes from PCAP FTP data".format(len(ftp_data)))
+
 if ftp_received.exists():
     try:
-        b64_data = open(str(ftp_received)).read().strip()
-        gz_data = base64.b64decode(b64_data)
-        xlsx_data = gzip.decompress(gz_data)
+        raw_data = open(str(ftp_received), 'rb').read()
+        # Check if it's base64-encoded gzip
+        try:
+            text_data = raw_data.decode("utf-8", errors="replace").strip()
+            # Check if it looks like base64
+            if re.match(r'^[A-Za-z0-9+/=]+$', text_data) and len(text_data) > 100:
+                gz_data = base64.b64decode(text_data)
+                xlsx_data = gzip.decompress(gz_data)
+            else:
+                xlsx_data = raw_data
+        except Exception:
+            xlsx_data = raw_data
+        
         # Check for marker in the XLSX
         if b"7vQm91Xe" in xlsx_data:
             log_ok("FTP", "Recovered marker from FTP XLSX payload")
@@ -365,14 +492,15 @@ if ws_payload.exists():
             tmp_enc_path = tmp_enc.name
         
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 ["openssl", "enc", "-aes-256-cbc", "-d",
                  "-salt", "-md", "sha256", "-pass", "pass:{}".format(WS_PASSWORD),
                  "-in", tmp_enc_path],
-                capture_output=True, text=False, timeout=30
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            if result.returncode == 0:
-                decrypted = result.stdout
+            out, err = proc.communicate()
+            if proc.returncode == 0:
+                decrypted = out
                 if isinstance(decrypted, bytes):
                     decrypted_text = decrypted.decode("utf-8", errors="replace")
                 else:
@@ -382,7 +510,7 @@ if ws_payload.exists():
                 else:
                     log_fail("WebSocket", "Marker not found in decrypted WebSocket data")
             else:
-                log_fail("WebSocket", "OpenSSL decryption failed: {}".format(result.stderr.decode(errors='replace')))
+                log_fail("WebSocket", "OpenSSL decryption failed: {}".format(err.decode(errors='replace')))
         finally:
             os.unlink(tmp_enc_path)
     except Exception as e:

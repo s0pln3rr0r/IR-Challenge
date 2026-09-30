@@ -13,20 +13,28 @@ done
 # Collect bash history from victim machine via SCP (if VICTIM_IP is set)
 if [ -n "${VICTIM_IP:-}" ]; then
     echo "[*] Collecting bash history from victim at $VICTIM_IP..."
-    # Try multiple possible locations for bash history on the victim
-    for hist_path in "/root/.bash_history" "/home/*/.bash_history"; do
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@$VICTIM_IP:$hist_path" "$O/victim_bash_history.txt" 2>/dev/null && {
-            echo "[+] Victim bash history collected from $hist_path"
-            break
-        } || true
-    done
-    # If SCP failed, try using ssh + cat
-    if [ ! -f "$O/victim_bash_history.txt" ]; then
-        echo "[*] Trying ssh to collect victim bash history..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@$VICTIM_IP" "cat /root/.bash_history" > "$O/victim_bash_history.txt" 2>/dev/null || {
-            echo "[-] Could not collect victim bash history (expected if victim is not reachable)"
-            touch "$O/victim_bash_history.txt"
+    # Use timeout to prevent hanging on password prompts
+    TIMEOUT_CMD="timeout 10"
+    
+    # Check if SSH key-based auth works first (non-interactive)
+    if $TIMEOUT_CMD ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@$VICTIM_IP" "echo connected" 2>/dev/null; then
+        echo "[*] SSH key auth works, collecting bash history..."
+        $TIMEOUT_CMD scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@$VICTIM_IP:/root/.bash_history" "$O/victim_bash_history.txt" 2>/dev/null && {
+            echo "[+] Victim bash history collected via SCP"
+        } || {
+            # Fallback: use ssh + cat
+            $TIMEOUT_CMD ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "root@$VICTIM_IP" "cat /root/.bash_history" > "$O/victim_bash_history.txt" 2>/dev/null && {
+                echo "[+] Victim bash history collected via SSH"
+            } || {
+                echo "[-] Could not collect victim bash history"
+                touch "$O/victim_bash_history.txt"
+            }
         }
+    else
+        echo "[-] SSH key auth not available for root@$VICTIM_IP"
+        echo "[-] To set up: ssh-copy-id root@$VICTIM_IP (enter password when prompted)"
+        echo "[-] Or manually copy from victim: scp root@$VICTIM_IP:/root/.bash_history $O/victim_bash_history.txt"
+        touch "$O/victim_bash_history.txt"
     fi
 fi
 
